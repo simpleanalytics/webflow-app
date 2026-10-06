@@ -12,13 +12,6 @@ export const dynamic = "force-dynamic";
  * Applies the registered script to the site header via upsertCustomCode.
  */
 export async function POST(request: NextRequest) {
-  const clonedRequest = request.clone() as NextRequest;
-  const accessToken = await jwt.verifyAuth(clonedRequest);
-
-  if (!accessToken) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
   try {
     const body = await request.json();
     const { siteId, scriptId, version } = body as {
@@ -34,14 +27,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const accessToken = await jwt.verifyAuth(request, siteId);
+    if (!accessToken) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const webflow = new WebflowClient({ accessToken });
     await applySiteScript(webflow, siteId, scriptId, version);
 
     return NextResponse.json({ success: true });
-  } catch (error) {
-    console.error("Error in /api/scripts/apply:", error);
+  } catch {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to apply script" },
+      { error: "Failed to apply script" },
       { status: 500 }
     );
   }

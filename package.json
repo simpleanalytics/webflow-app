@@ -4,11 +4,14 @@
   "description": "Simple Analytics Webflow Hybrid App",
   "scripts": {
     "dev": "concurrently \"cd data-client && npm run dev\" \"cd designer-extension && npm run dev\"",
-    "install:all": "cd data-client && npm install && cd ../designer-extension && npm install",
-    "build": "cd data-client && npm run build && cd ../designer-extension && npm run build:dev"
+    "install:all": "npm ci --prefix data-client && npm ci --prefix designer-extension",
+    "build": "npm run build --prefix data-client && npm run build --prefix designer-extension"
   },
   "license": "MIT",
   "dependencies": {
     "concurrently": "^9.1.0"
+  },
+  "engines": {
+    "node": ">=24"
   }
 }

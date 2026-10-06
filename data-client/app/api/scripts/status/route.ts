@@ -8,17 +8,10 @@ export const dynamic = "force-dynamic";
 /**
  * GET /api/scripts/status?siteId=...
  *
- * Checks if a Simple Analytics script is already registered for the site.
+ * Checks if a Simple Analytics script is currently applied to the site.
  * Returns { installed: boolean, version?: string }
  */
 export async function GET(request: NextRequest) {
-  const clonedRequest = request.clone() as NextRequest;
-  const accessToken = await jwt.verifyAuth(clonedRequest);
-
-  if (!accessToken) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
   try {
     const { searchParams } = new URL(request.url);
     const siteId = searchParams.get("siteId");
@@ -27,14 +20,18 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "siteId is required" }, { status: 400 });
     }
 
+    const accessToken = await jwt.verifyAuth(request, siteId);
+    if (!accessToken) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const webflow = new WebflowClient({ accessToken });
     const status = await checkScriptStatus(webflow, siteId);
 
     return NextResponse.json(status);
-  } catch (error) {
-    console.error("Error in /api/scripts/status:", error);
+  } catch {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to check script status" },
+      { error: "Failed to check script status" },
       { status: 500 }
     );
   }

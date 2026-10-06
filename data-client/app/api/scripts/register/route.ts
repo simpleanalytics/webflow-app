@@ -13,13 +13,6 @@ export const dynamic = "force-dynamic";
  * Generates the inline script and registers it with Webflow.
  */
 export async function POST(request: NextRequest) {
-  const clonedRequest = request.clone() as NextRequest;
-  const accessToken = await jwt.verifyAuth(clonedRequest);
-
-  if (!accessToken) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
   try {
     const body = await request.json();
     const { siteId, config } = body as { siteId: string; config: ScriptConfig };
@@ -28,15 +21,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "siteId is required" }, { status: 400 });
     }
 
+    const accessToken = await jwt.verifyAuth(request, siteId);
+    if (!accessToken) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const sourceCode = generateScript(config);
     const webflow = new WebflowClient({ accessToken });
     const result = await registerInlineScript(webflow, siteId, sourceCode);
 
     return NextResponse.json(result);
-  } catch (error) {
-    console.error("Error in /api/scripts/register:", error);
+  } catch {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to register script" },
+      { error: "Failed to register script" },
       { status: 500 }
     );
   }

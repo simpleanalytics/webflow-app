@@ -94,7 +94,7 @@ export default defineConfig({
   },
   plugins: [
     react(),
-    wfDesignerExtensionPlugin(['../data-client/app/api/**/*.ts']),
+    wfDesignerExtensionPlugin(['../data-client/app/api']),
   ],
   root: './',
   base: './',

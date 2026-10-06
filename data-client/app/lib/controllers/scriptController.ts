@@ -103,14 +103,16 @@ export async function checkScriptStatus(
       })
     );
 
-  const installed = matching.length > 0;
-  const version = installed ? (matching[0].version ?? "1.0.0") : undefined;
+  const customCode = await webflow.sites.scripts.getCustomCode(siteId);
+  const applied = customCode?.scripts || [];
+  const installedScript = applied.find(script => matching.some(registered => registered.id === script.id));
+  const installed = Boolean(installedScript);
+  const version = installedScript?.version;
 
   // Check for duplicate SA scripts on the site (e.g. manually added)
   let duplicateDetected = false;
   try {
-    const customCode = await webflow.sites.scripts.getCustomCode(siteId);
-    const scripts = customCode?.scripts || [];
+    const scripts = applied;
 
     // Count how many applied scripts reference simpleanalyticscdn in their source
     // Our app registers scripts with displayName "Simple Analytics",
@@ -124,7 +126,6 @@ export async function checkScriptStatus(
       const registered = (existingScripts.registeredScripts || []).find(
         (r) => r.id === s.id
       );
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const reg = registered as Record<string, unknown> | undefined;
       if (typeof reg?.sourceUrl === "string" && reg.sourceUrl.includes("simpleanalyticscdn.com")) return true;
       if (typeof reg?.source === "string" && reg.source.includes("simpleanalyticscdn.com")) return true;

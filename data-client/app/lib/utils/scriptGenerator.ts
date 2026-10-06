@@ -21,7 +21,11 @@ export interface ScriptConfig {
  */
 function getBaseUrl(config: ScriptConfig): string {
   if (config.customDomain) {
-    return `https://${config.customDomain}`;
+    const url = new URL(`https://${config.customDomain}`);
+    if (url.hostname !== config.customDomain || url.port || url.username || url.password || url.pathname !== "/" || url.search || url.hash) {
+      throw new Error("Custom domain must be a hostname");
+    }
+    return url.origin;
   }
   return "https://scripts.simpleanalyticscdn.com";
 }
@@ -32,6 +36,14 @@ function getBaseUrl(config: ScriptConfig): string {
  * Ported from the original Simple Analytics Webflow app (public/index.js).
  */
 export function generateScript(config: ScriptConfig): string {
+  if (!config || typeof config !== "object") throw new Error("Invalid script configuration");
+  for (const key of ["ignorePages", "customDomain", "overwriteDomain", "downloadExtensions"] as const) {
+    if (typeof config[key] !== "string" || config[key].length > 2048) throw new Error("Invalid script configuration");
+  }
+  for (const key of ["trackPageviews", "trackEvents", "collectDNT", "automatedEvents", "hashMode", "collectOutbound", "collectEmails", "collectDownloads", "usePageTitle", "collectFullUrls", "collectLinkEvents"] as const) {
+    if (typeof config[key] !== "boolean") throw new Error("Invalid script configuration");
+  }
+  const quote = (value: string) => JSON.stringify(value).replace(/</g, "\\u003c");
   const baseUrl = getBaseUrl(config);
   let code = "(function(){";
 
@@ -41,7 +53,7 @@ export function generateScript(config: ScriptConfig): string {
   }
 
   code += 'var s=document.createElement("script");';
-  code += `s.src="${baseUrl}/latest.js";`;
+  code += `s.src=${quote(`${baseUrl}/latest.js`)};`;
   code += "s.async=true;";
 
   if (!config.trackPageviews) {
@@ -54,17 +66,17 @@ export function generateScript(config: ScriptConfig): string {
     code += 's.dataset.mode="hash";';
   }
   if (config.ignorePages) {
-    code += `s.dataset.ignorePages="${config.ignorePages}";`;
+    code += `s.dataset.ignorePages=${quote(config.ignorePages)};`;
   }
   if (config.overwriteDomain) {
-    code += `s.dataset.hostname="${config.overwriteDomain}";`;
+    code += `s.dataset.hostname=${quote(config.overwriteDomain)};`;
   }
 
   code += "document.head.appendChild(s);";
 
-  if (config.automatedEvents) {
+  if (config.automatedEvents && (config.collectOutbound || config.collectEmails || config.collectDownloads)) {
     code += 'var ae=document.createElement("script");';
-    code += `ae.src="${baseUrl}/auto-events.js";`;
+    code += `ae.src=${quote(`${baseUrl}/auto-events.js`)};`;
     code += "ae.async=true;";
 
     // Build data-collect value from individual toggles
@@ -77,7 +89,7 @@ export function generateScript(config: ScriptConfig): string {
     }
 
     if (config.downloadExtensions) {
-      code += `ae.dataset.extensions="${config.downloadExtensions}";`;
+      code += `ae.dataset.extensions=${quote(config.downloadExtensions)};`;
     }
     if (!config.usePageTitle) {
       code += 'ae.dataset.useTitle="false";';

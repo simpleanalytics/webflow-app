@@ -42,6 +42,8 @@ function drawBox(content: string): string {
  * @returns {string} The string with ANSI color codes removed.
  */
 function stripAnsi(string: string): string {
+  // ANSI escape is intentionally a control character.
+  // eslint-disable-next-line no-control-regex
   return string.replace(/\u001b\[[0-9]{1,2}m/g, "");
 }
 

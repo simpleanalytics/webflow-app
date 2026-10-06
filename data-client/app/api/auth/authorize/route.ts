@@ -1,37 +1,29 @@
+import { randomBytes } from "node:crypto";
 import { WebflowClient } from "webflow-api";
-import { NextResponse } from "next/server";
-import { OauthScope } from "webflow-api/api/types/OAuthScope";
+import { NextRequest, NextResponse } from "next/server";
+import { getRedis } from "../../../lib/utils/database";
+import { appOrigin, requiredEnv } from "../../../lib/utils/config";
 
 export const dynamic = "force-dynamic";
 
-/**
- * Authorize API Route Handler
- * --------------------------
- * Returns the Webflow OAuth URL as JSON when ?json=true is set (for popup flows),
- * otherwise redirects directly (for direct navigation).
- */
-
-const scopes = [
-  "sites:read",
-  "custom_code:read",
-  "custom_code:write",
-  "authorized_user:read",
-];
-
-export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
-  const isDesigner = searchParams.get("state") === "webflow_designer";
-
-  const authorizeUrl = WebflowClient.authorizeURL({
-    scope: scopes as OauthScope[],
-    clientId: process.env.WEBFLOW_CLIENT_ID!,
-    state: isDesigner ? "webflow_designer" : undefined,
-  });
-
-  // Return URL as JSON for client-side navigation (avoids bot detection on server redirect)
-  if (searchParams.get("json") === "true") {
-    return NextResponse.json({ url: authorizeUrl });
+export async function GET(request: NextRequest) {
+  try {
+    const state = randomBytes(32).toString("hex");
+    const popup = request.nextUrl.searchParams.get("popup") === "true";
+    await (await getRedis()).set(`oauth:${state}`, JSON.stringify({ popup }), { EX: 600 });
+    const url = WebflowClient.authorizeURL({
+      clientId: requiredEnv("WEBFLOW_CLIENT_ID"),
+      redirectUri: `${appOrigin()}/api/auth/callback`,
+      scope: ["sites:read", "custom_code:read", "custom_code:write", "authorized_user:read"],
+      state,
+    });
+    const response = NextResponse.redirect(url);
+    response.cookies.set("webflow_oauth_state", state, {
+      httpOnly: true, secure: appOrigin().startsWith("https:"), sameSite: "lax",
+      path: "/api/auth", maxAge: 600,
+    });
+    return response;
+  } catch {
+    return NextResponse.json({ error: "Authorization is temporarily unavailable" }, { status: 503 });
   }
-
-  return NextResponse.redirect(authorizeUrl);
 }

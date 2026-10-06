@@ -13,17 +13,13 @@ export function AuthScreen({ onAuth }: AuthScreenProps) {
     setError(null);
 
     try {
-      const response = await fetch(
-        `${BASE_URL}/api/auth/authorize?state=webflow_designer&json=true`
-      );
-
-      if (!response.ok) {
-        throw new Error(`Server returned ${response.status}`);
+      // Open synchronously so the browser permits the popup and the backend
+      // can set its state cookie before redirecting to Webflow.
+      const authWindow = window.open(`${BASE_URL}/api/auth/authorize?popup=true`, "_blank", "width=600,height=600");
+      if (!authWindow) {
+        setError("Allow popups to connect to Webflow, then try again.");
+        return;
       }
-
-      const { url } = await response.json();
-
-      const authWindow = window.open(url, "_blank", "width=600,height=600");
 
       const checkWindow = setInterval(() => {
         if (authWindow?.closed) {
