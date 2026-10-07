@@ -1,110 +1,130 @@
-# Simple Analytics — Webflow Hybrid App
+# Simple Analytics Webflow App
 
-A Webflow Hybrid App that lets site owners add [Simple Analytics](https://www.simpleanalytics.com/) to their Webflow sites directly from the Webflow Designer. It uses the Webflow Data API to inject the Simple Analytics tracking script via Custom Code, and the Designer API to authenticate users.
+A Webflow Hybrid App that lets site owners add and configure
+[Simple Analytics](https://www.simpleanalytics.com/) from the Webflow Designer.
+The Designer Extension provides the interface; the Next.js data client handles
+OAuth and manages the app's custom code through the Webflow Data API.
 
 ## Architecture
 
-```
-designer-extension/          Vite + React frontend (runs inside Webflow Designer)
-  ├── src/App.tsx             Entry point — auth gate + config panel
-  ├── src/hooks/useAuth.ts    OAuth token exchange via ID tokens
-  └── src/services/api.ts     Calls to the data-client API
+```text
+designer-extension/          Vite + React extension shown in Webflow Designer
+  src/App.tsx                Authentication gate and configuration panel
+  src/hooks/useAuth.ts       Designer ID-token exchange
+  src/services/api.ts        Calls to the data-client API
 
-data-client/                 Next.js backend (API + OAuth server)
-  ├── app/api/auth/           OAuth authorize / callback / token routes
-  ├── app/api/scripts/        Register + apply Simple Analytics script
-  └── app/lib/utils/          Database (SQLite), JWT, ngrok helper
+data-client/                 Next.js API and OAuth service
+  app/api/auth/              OAuth, session, and disconnect routes
+  app/api/scripts/           Register, apply, inspect, and remove app scripts
+  app/lib/utils/database.ts  Encrypted OAuth-token storage in Redis
 ```
 
 ## Prerequisites
 
-- Node.js 18+
-- A [Webflow](https://webflow.com) site and workspace
-- A registered Webflow App (see Setup step 2)
+- Node.js 24 or newer
+- Redis 7
+- A Webflow site and workspace
+- A registered Webflow App
 
-## Setup
+## Local setup
 
-1. **Clone the repository:**
-
-   ```bash
-   git clone https://github.com/runclubs/Simple-Analytics-App.git
-   cd Simple-Analytics-App
-   ```
-
-2. **Install all dependencies:**
+1. Clone this repository and install the locked dependencies:
 
    ```bash
-   npm install
+   git clone https://github.com/simpleanalytics/webflow-app.git
+   cd webflow-app
+   npm ci
    npm run install:all
    ```
 
-   This installs the root dependencies (concurrently), plus all packages for both `data-client/` and `designer-extension/`.
+2. Start a local Redis instance. This example exposes Redis only on localhost:
 
-3. **Register a Webflow App** in [your Workspace settings](https://developers.webflow.com/v2.0.0/data/docs/register-an-app):
+   ```bash
+   docker run --rm --name webflow-app-redis -p 127.0.0.1:6379:6379 redis:7.4.8
+   ```
 
-   - Redirect URI: `http://localhost:3001/api/auth/callback`
-   - Required scopes (all four must be enabled):
-     - `authorized_user:read`
-     - `sites:read`
-     - `custom_code:read`
-     - `custom_code:write`
+3. Register a Webflow App and configure this redirect URI:
 
-   > **Note:** if you forget to enable `authorized_user:read`, the OAuth flow will fail with an `invalid_scope` error.
+   ```text
+   http://localhost:3001/api/auth/callback
+   ```
 
-4. **Create the environment file:**
+   Enable these scopes:
+
+   - `authorized_user:read`
+   - `sites:read`
+   - `custom_code:read`
+   - `custom_code:write`
+
+4. Create the backend environment file:
 
    ```bash
    cp data-client/.env.example data-client/.env
    ```
 
-   Open `data-client/.env` and fill in your credentials from the Webflow Dashboard (Workspace Settings → Apps & Integrations → Your App):
+   Set the Webflow client ID and secret. The checked-in defaults point the
+   backend at local Redis and the local Designer Extension.
 
-   | Variable | Required | Where to find it |
-   |---|---|---|
-   | `WEBFLOW_CLIENT_ID` | Yes | Your app's OAuth Client ID |
-   | `WEBFLOW_CLIENT_SECRET` | Yes | Your app's OAuth Client Secret |
-   | `NGROK_AUTH_TOKEN` | No | Only needed for external testing |
-
-   The remaining variables (`PORT`, `DESIGNER_EXTENSION_URI`) have sensible defaults and can be left as-is.
-
-   > **Important:** the `.env` file contains secrets and is git-ignored. The `.env.example` file in the repo serves as a reference for which variables are needed. Never commit actual API keys.
-
-5. **Start the app:**
+5. Start both applications:
 
    ```bash
    npm run dev
    ```
 
-   This starts both servers concurrently:
-   - **Data Client (backend):** `http://localhost:3001`
-   - **Designer Extension (frontend):** `http://localhost:1337`
+   - Data client: `http://localhost:3001`
+   - Designer Extension: `http://localhost:1337`
 
-6. **Authorize the app** by navigating to `http://localhost:3001` in your browser — this redirects to the Webflow OAuth consent screen. Click **Authorize**.
+6. Open `http://localhost:3001` to authorize the app, then launch the
+   development app from the Webflow Designer Apps panel.
 
-7. **Open the Designer Extension** in the Webflow Designer: Apps panel → your app → **"Launch Development App"**.
-
-## Environment Variables
+## Environment variables
 
 | Variable | Required | Description |
 |---|---|---|
 | `WEBFLOW_CLIENT_ID` | Yes | OAuth client ID from Webflow |
-| `WEBFLOW_CLIENT_SECRET` | Yes | OAuth client secret from Webflow |
-| `NGROK_AUTH_TOKEN` | No | For exposing localhost during development |
-| `PORT` | No | Data client port (default: `3001`) |
-| `DESIGNER_EXTENSION_URI` | No | Extension origin for CORS + postMessage (default: `http://localhost:1337`) |
+| `WEBFLOW_CLIENT_SECRET` | Yes | OAuth client secret; also derives the at-rest encryption key |
+| `REDIS_URL` | Yes | Redis connection URL |
+| `APP_BASE_URL` | Yes | Public origin of the data client; its OAuth callback must match Webflow exactly |
+| `DESIGNER_EXTENSION_URI` | Yes | Exact Designer Extension origin allowed by CORS and `postMessage` |
+| `PORT` | No | Local data-client port; defaults to `3001` |
+| `NGROK_AUTH_TOKEN` | No | Development tunnel credential |
+
+Keep `.env` files out of version control; they contain credentials.
+
+## Script ownership and uninstalling
+
+Webflow only exposes custom code owned by this app. It cannot detect a Simple
+Analytics script added manually in Site settings or by another app. Remove any
+existing manual installation before using this app to avoid duplicate pageviews.
+
+Before uninstalling the Webflow App, choose **Disconnect Webflow** in the
+extension and confirm the action. This removes the app-owned site script,
+deletes the stored site authorization, and revokes the Webflow grant when its
+last connected site is removed. Publish the Webflow site afterward so script
+removal takes effect.
+
+## Validation
+
+```bash
+npm test --prefix data-client
+npm run lint --prefix data-client
+npm run lint --prefix designer-extension
+npm run build
+```
 
 ## Security
 
-- **Tokens encrypted at rest** — access tokens are AES-256-GCM encrypted in the SQLite database, keyed from `WEBFLOW_CLIENT_SECRET`.
-- **Env validation** — the server refuses to start if required credentials are missing.
-- **CORS** — the API only accepts requests from the configured `DESIGNER_EXTENSION_URI`.
-- **Security headers** — `X-Content-Type-Options: nosniff` and `X-Frame-Options: DENY` on all API responses.
-- **postMessage origin** — the OAuth callback targets the extension origin instead of `*`.
+- OAuth tokens are encrypted with AES-256-GCM before Redis persistence.
+- Designer sessions are short-lived, site-bound JWTs.
+- OAuth callbacks use a one-time state value and the same configured redirect
+  URI for authorization and token exchange.
+- API CORS is restricted to `DESIGNER_EXTENSION_URI`.
+- Disconnect removes app-owned custom code and stored authorization data.
 
-## Tech Stack
+## Tech stack
 
-- **Data Client:** [Next.js](https://nextjs.org/), [Webflow SDK](https://github.com/webflow/js-webflow-api), SQLite
-- **Designer Extension:** [React](https://react.dev/), [Vite](https://vitejs.dev/), [Webflow Designer API](https://developers.webflow.com/designer/reference/introduction)
+- Next.js, Redis, and the Webflow Data API
+- React, Vite, and the Webflow Designer API
 
 ## License
 

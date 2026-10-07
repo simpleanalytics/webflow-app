@@ -2,7 +2,8 @@ import { useState, useCallback, useEffect } from "react";
 import { useSites } from "../hooks/useSites";
 import { useInstallScript } from "../hooks/useInstallScript";
 import { StatusMessage } from "./StatusMessage";
-import { ScriptConfig } from "../types/types";
+import { ScriptConfig, StatusInfo } from "../types/types";
+import { disconnectWebflow } from "../services/api";
 
 const DEFAULT_CONFIG: ScriptConfig = {
   trackPageviews: true,
@@ -50,10 +51,10 @@ function saveConfig(siteId: string | null, config: ScriptConfig) {
 
 interface ConfigPanelProps {
   sessionToken: string;
-  onLogout: () => void;
+  onDisconnect: () => void;
 }
 
-export function ConfigPanel({ sessionToken, onLogout }: ConfigPanelProps) {
+export function ConfigPanel({ sessionToken, onDisconnect }: ConfigPanelProps) {
   const { siteId } = useSites();
   const {
     install,
@@ -67,20 +68,27 @@ export function ConfigPanel({ sessionToken, onLogout }: ConfigPanelProps) {
   const [activeTab, setActiveTab] = useState<"settings" | "info">("settings");
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showEvents, setShowEvents] = useState(false);
+  const [isDisconnecting, setIsDisconnecting] = useState(false);
+  const [disconnectStatus, setDisconnectStatus] = useState<StatusInfo>({
+    message: "",
+    type: "",
+  });
 
   const [config, setConfig] = useState<ScriptConfig>(() => loadConfig(siteId));
+  const [loadedSiteId, setLoadedSiteId] = useState<string | null>(null);
 
   // Reload config when siteId becomes available
   useEffect(() => {
     if (siteId) {
       setConfig(loadConfig(siteId));
+      setLoadedSiteId(siteId);
     }
   }, [siteId]);
 
-  // Persist config on every change
+  // Do not persist defaults until the saved config for this site has loaded.
   useEffect(() => {
-    saveConfig(siteId, config);
-  }, [siteId, config]);
+    if (siteId && loadedSiteId === siteId) saveConfig(siteId, config);
+  }, [siteId, loadedSiteId, config]);
 
   function handleToggle(key: keyof ScriptConfig) {
     setConfig((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -111,7 +119,41 @@ export function ConfigPanel({ sessionToken, onLogout }: ConfigPanelProps) {
   }, []);
 
   function handleInstall() {
+    setDisconnectStatus({ message: "", type: "" });
     install(config);
+  }
+
+  async function handleDisconnect() {
+    if (!siteId) {
+      setDisconnectStatus({
+        message: "Could not detect site. Open this app from the Webflow Designer.",
+        type: "error",
+      });
+      return;
+    }
+    if (!window.confirm(
+      "Disconnect Simple Analytics from this site? This removes the app's script and stored Webflow authorization. Publish the site afterward to apply the script removal."
+    )) return;
+
+    setIsDisconnecting(true);
+    setDisconnectStatus({ message: "Disconnecting Webflow...", type: "info" });
+    try {
+      await disconnectWebflow(siteId, sessionToken);
+      const key = getStorageKey(siteId);
+      try {
+        if (key) localStorage.removeItem(key);
+      } catch {
+        // Authorization is already removed; local storage may be unavailable.
+      }
+      onDisconnect();
+    } catch (error) {
+      setDisconnectStatus({
+        message: `Error: ${error instanceof Error ? error.message : "Disconnection failed"}`,
+        type: "error",
+      });
+    } finally {
+      setIsDisconnecting(false);
+    }
   }
 
   return (
@@ -413,30 +455,35 @@ export function ConfigPanel({ sessionToken, onLogout }: ConfigPanelProps) {
                 <button
                   className="btn btn-primary"
                   onClick={handleInstall}
-                  disabled={isInstalling || isRemoving}
+                  disabled={isInstalling || isRemoving || isDisconnecting}
                 >
                   {isInstalling ? "Updating..." : "Update Script"}
                 </button>
                 <button
                   className="btn btn-danger"
                   onClick={uninstall}
-                  disabled={isInstalling || isRemoving}
+                  disabled={isInstalling || isRemoving || isDisconnecting}
                 >
                   {isRemoving ? "Removing..." : "Remove Script"}
                 </button>
               </>
             ) : (
-              <button
-                className="btn btn-primary"
-                onClick={handleInstall}
-                disabled={isInstalling}
-              >
-                {isInstalling ? "Installing..." : "Install Script"}
-              </button>
+              <>
+                <div className="option-hint">
+                  Already added Simple Analytics in Webflow Site settings? Remove
+                  that manual script before installing to avoid duplicate pageviews.
+                </div>
+                <button
+                  className="btn btn-primary"
+                  onClick={handleInstall}
+                  disabled={isInstalling || isDisconnecting}
+                >
+                  {isInstalling ? "Installing..." : "Install Script"}
+                </button>
+              </>
             )}
           </div>
 
-          <StatusMessage status={status} />
         </>
       )}
 
@@ -459,6 +506,11 @@ export function ConfigPanel({ sessionToken, onLogout }: ConfigPanelProps) {
               Install Script. The app will automatically add the Simple Analytics
               script to your site. After installing, publish your site to start
               collecting data.
+            </p>
+            <p className="info-text">
+              If Simple Analytics was previously added in Webflow Site settings,
+              remove that manual script first. Webflow does not let apps inspect
+              custom code added manually or by other apps.
             </p>
           </div>
 
@@ -483,6 +535,8 @@ export function ConfigPanel({ sessionToken, onLogout }: ConfigPanelProps) {
         </div>
       )}
 
+      <StatusMessage status={disconnectStatus.message ? disconnectStatus : status} />
+
       <div className="panel-footer">
         <span className="footer-top">
           Powered by{" "}
@@ -495,8 +549,12 @@ export function ConfigPanel({ sessionToken, onLogout }: ConfigPanelProps) {
           </a>
         </span>
         <span className="footer-bottom">
-          <button className="footer-disconnect" onClick={onLogout}>
-            Disconnect
+          <button
+            className="footer-disconnect"
+            onClick={handleDisconnect}
+            disabled={isDisconnecting}
+          >
+            {isDisconnecting ? "Disconnecting..." : "Disconnect Webflow"}
           </button>
           <span>&middot;</span>
           <a href="https://tally.so/r/lbd86B" target="_blank" rel="noopener noreferrer">

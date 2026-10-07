@@ -18,7 +18,6 @@ export function useInstallScript(
   const [isRemoving, setIsRemoving] = useState(false);
   const [isChecking, setIsChecking] = useState(true);
   const [isInstalled, setIsInstalled] = useState(false);
-  const [duplicateDetected, setDuplicateDetected] = useState(false);
   const [scriptVersion, setScriptVersion] = useState<string | null>(null);
   const [status, setStatus] = useState<StatusInfo>({ message: "", type: "" });
 
@@ -37,7 +36,6 @@ export function useInstallScript(
         if (!cancelled) {
           setIsInstalled(result.installed);
           setScriptVersion(result.version ?? null);
-          setDuplicateDetected(result.duplicateDetected);
         }
       } catch {
         // Silent fail — default to not installed
@@ -133,7 +131,6 @@ export function useInstallScript(
     isRemoving,
     isChecking,
     isInstalled,
-    duplicateDetected,
     scriptVersion,
     status,
   };

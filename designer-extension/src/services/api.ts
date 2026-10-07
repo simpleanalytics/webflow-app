@@ -94,3 +94,20 @@ export async function removeScript(
     throw new Error(data.error || "Failed to remove script");
   }
 }
+
+/** POST /api/auth/disconnect - remove app data and authorization for this site */
+export async function disconnectWebflow(
+  siteId: string,
+  token: string
+): Promise<void> {
+  const response = await fetchWithTimeout(`${BASE_URL}/api/auth/disconnect`, {
+    method: "POST",
+    headers: authHeaders(token),
+    body: JSON.stringify({ siteId }),
+  });
+
+  if (!response.ok) {
+    const data = await response.json();
+    throw new Error(data.error || "Failed to disconnect Webflow");
+  }
+}

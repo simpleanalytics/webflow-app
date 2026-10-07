@@ -2,9 +2,18 @@ import { timingSafeEqual } from "node:crypto";
 import { WebflowClient } from "webflow-api";
 import { NextRequest, NextResponse } from "next/server";
 import db, { getRedis } from "../../../lib/utils/database";
-import { extensionOrigin, requiredEnv } from "../../../lib/utils/config";
+import { appOrigin, extensionOrigin, requiredEnv } from "../../../lib/utils/config";
 
 export const dynamic = "force-dynamic";
+
+export function exchangeAuthorizationCode(code: string) {
+  return WebflowClient.getAccessToken({
+    clientId: requiredEnv("WEBFLOW_CLIENT_ID"),
+    clientSecret: requiredEnv("WEBFLOW_CLIENT_SECRET"),
+    redirectUri: `${appOrigin()}/api/auth/callback`,
+    code,
+  });
+}
 
 export async function GET(request: NextRequest) {
   const state = request.nextUrl.searchParams.get("state");
@@ -19,10 +28,7 @@ export async function GET(request: NextRequest) {
     const saved = await (await getRedis()).getDel(`oauth:${state}`);
     if (!saved) return NextResponse.json({ error: "Authorization expired. Please connect again." }, { status: 400 });
     const { popup } = JSON.parse(saved);
-    const accessToken = await WebflowClient.getAccessToken({
-      clientId: requiredEnv("WEBFLOW_CLIENT_ID"),
-      clientSecret: requiredEnv("WEBFLOW_CLIENT_SECRET"), code,
-    });
+    const accessToken = await exchangeAuthorizationCode(code);
     const webflow = new WebflowClient({ accessToken });
     const { sites = [] } = await webflow.sites.list();
     await Promise.all(sites.map(site => db.insertSiteAuthorization(site.id, accessToken)));

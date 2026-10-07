@@ -1,4 +1,4 @@
-import { WebflowClient } from "webflow-api";
+import { Webflow, WebflowClient } from "webflow-api";
 
 const SCRIPT_DISPLAY_NAME = "Simple Analytics";
 
@@ -82,18 +82,16 @@ export async function applySiteScript(
 interface ScriptStatus {
   installed: boolean;
   version?: string;
-  duplicateDetected: boolean;
 }
 
 /**
- * Check if a Simple Analytics script is already registered for a site,
- * and detect duplicate SA scripts (e.g. manually added via Project Settings).
+ * Check if a Simple Analytics script registered by this app is applied to a site.
+ * Webflow does not expose custom code owned by other apps or added manually.
  */
 export async function checkScriptStatus(
   webflow: WebflowClient,
   siteId: string
 ): Promise<ScriptStatus> {
-  // Check registered scripts from our app
   const existingScripts = await webflow.scripts.list(siteId);
   const matching = (existingScripts.registeredScripts || [])
     .filter((s) => s.displayName === SCRIPT_DISPLAY_NAME)
@@ -109,36 +107,7 @@ export async function checkScriptStatus(
   const installed = Boolean(installedScript);
   const version = installedScript?.version;
 
-  // Check for duplicate SA scripts on the site (e.g. manually added)
-  let duplicateDetected = false;
-  try {
-    const scripts = applied;
-
-    // Count how many applied scripts reference simpleanalyticscdn in their source
-    // Our app registers scripts with displayName "Simple Analytics",
-    // so any OTHER script pointing to simpleanalyticscdn.com is a duplicate
-    const ourScriptIds = new Set(matching.map((s) => s.id));
-    const otherSAScripts = scripts.filter((s: { id?: string }) => {
-      // If this script is one of ours, skip it
-      if (s.id && ourScriptIds.has(s.id)) return false;
-
-      // Check registered scripts list for source URL
-      const registered = (existingScripts.registeredScripts || []).find(
-        (r) => r.id === s.id
-      );
-      const reg = registered as Record<string, unknown> | undefined;
-      if (typeof reg?.sourceUrl === "string" && reg.sourceUrl.includes("simpleanalyticscdn.com")) return true;
-      if (typeof reg?.source === "string" && reg.source.includes("simpleanalyticscdn.com")) return true;
-
-      return false;
-    });
-
-    duplicateDetected = otherSAScripts.length > 0;
-  } catch {
-    // getCustomCode may fail if no custom code exists yet — that's fine
-  }
-
-  return { installed, version, duplicateDetected };
+  return { installed, version };
 }
 
 /**
@@ -148,5 +117,10 @@ export async function removeSiteScript(
   webflow: WebflowClient,
   siteId: string
 ): Promise<void> {
-  await webflow.sites.scripts.deleteCustomCode(siteId);
+  try {
+    await webflow.sites.scripts.deleteCustomCode(siteId);
+  } catch (error) {
+    // Disconnect is idempotent when the app has no custom code on the site.
+    if (!(error instanceof Webflow.NotFoundError)) throw error;
+  }
 }
