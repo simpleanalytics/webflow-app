@@ -440,3 +440,8 @@ body {
 .footer-disconnect:hover {
   color: #ccc;
 }
+
+.footer-disconnect:disabled {
+  color: #555;
+  cursor: not-allowed;
+}

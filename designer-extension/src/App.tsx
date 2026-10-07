@@ -5,7 +5,7 @@ import { ConfigPanel } from "./components/ConfigPanel";
 import "./App.css";
 
 function App() {
-  const { sessionToken, isAuthLoading, exchangeAndVerifyIdToken, logout } = useAuth();
+  const { sessionToken, isAuthLoading, exchangeAndVerifyIdToken, clearSession } = useAuth();
 
   useEffect(() => {
     webflow.setExtensionSize("comfortable");
@@ -27,7 +27,7 @@ function App() {
   }
 
   if (sessionToken) {
-    return <ConfigPanel sessionToken={sessionToken} onLogout={logout} />;
+    return <ConfigPanel sessionToken={sessionToken} onDisconnect={clearSession} />;
   }
 
   return <AuthScreen onAuth={exchangeAndVerifyIdToken} />;

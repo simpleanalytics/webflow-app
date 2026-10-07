@@ -3,15 +3,18 @@ import assert from "node:assert/strict";
 import { runInNewContext } from "node:vm";
 import { NextRequest } from "next/server";
 import { SignJWT } from "jose";
+import { WebflowClient } from "webflow-api";
 import db, { encrypt, decrypt } from "../app/lib/utils/database";
 import jwt from "../app/lib/utils/jwt";
 import { POST as exchange } from "../app/api/auth/token/route";
-import { GET as callback } from "../app/api/auth/callback/route";
+import { GET as callback, exchangeAuthorizationCode } from "../app/api/auth/callback/route";
+import { revokeAuthorization } from "../app/api/auth/disconnect/route";
 import { generateScript, type ScriptConfig } from "../app/lib/utils/scriptGenerator";
 import { checkScriptStatus } from "../app/lib/controllers/scriptController";
-import type { WebflowClient } from "webflow-api";
 
 process.env.WEBFLOW_CLIENT_SECRET = "local-test-secret-not-used-in-production";
+process.env.WEBFLOW_CLIENT_ID = "local-test-client";
+process.env.APP_BASE_URL = "https://webflow-app.example";
 afterEach(() => mock.restoreAll());
 
 test("tokens are encrypted with random IVs and reject tampering", () => {
@@ -67,6 +70,30 @@ test("OAuth rejects callbacks without a matching browser nonce before token exch
   assert.equal(fetchMock.mock.callCount(), 0);
 });
 
+test("OAuth token exchange repeats the exact configured callback URI", async () => {
+  const getAccessToken = mock.method(WebflowClient, "getAccessToken", async () => "access-token");
+  assert.equal(await exchangeAuthorizationCode("authorization-code"), "access-token");
+  assert.deepEqual(getAccessToken.mock.calls[0].arguments[0], {
+    clientId: "local-test-client",
+    clientSecret: "local-test-secret-not-used-in-production",
+    redirectUri: "https://webflow-app.example/api/auth/callback",
+    code: "authorization-code",
+  });
+});
+
+test("Webflow revocation sends the grant only to the official endpoint", async () => {
+  const fetchMock = mock.method(globalThis, "fetch", async () => new Response(null, { status: 200 }));
+  await revokeAuthorization("access-token");
+  assert.equal(fetchMock.mock.calls[0].arguments[0], "https://webflow.com/oauth/revoke_authorization");
+  const options = fetchMock.mock.calls[0].arguments[1] as RequestInit;
+  assert.equal(options.method, "POST");
+  assert.deepEqual(JSON.parse(options.body as string), {
+    client_id: "local-test-client",
+    client_secret: "local-test-secret-not-used-in-production",
+    access_token: "access-token",
+  });
+});
+
 const config: ScriptConfig = {
   trackPageviews: true, trackEvents: false, collectDNT: false, automatedEvents: true,
   hashMode: false, ignorePages: "", customDomain: "", overwriteDomain: "",
@@ -89,5 +116,5 @@ test("script settings are serialized safely and disabled event types stay disabl
 
 test("a registered script is not installed after it has been removed", async () => {
   const webflow = { scripts: { list: async () => ({ registeredScripts: [{ id: "sa", displayName: "Simple Analytics", version: "1.0.0" }] }) }, sites: { scripts: { getCustomCode: async () => ({ scripts: [] }) } } } as unknown as WebflowClient;
-  assert.equal((await checkScriptStatus(webflow, "site-a")).installed, false);
+  assert.deepEqual(await checkScriptStatus(webflow, "site-a"), { installed: false, version: undefined });
 });

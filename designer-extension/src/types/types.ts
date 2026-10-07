@@ -50,7 +50,6 @@ export interface RegisteredScript {
 export interface ScriptStatus {
   installed: boolean;
   version?: string;
-  duplicateDetected: boolean;
 }
 
 // Status message display

@@ -1,5 +1,11 @@
 import { createClient } from "redis";
-import { scryptSync, randomBytes, createCipheriv, createDecipheriv } from "node:crypto";
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHash,
+  randomBytes,
+  scryptSync,
+} from "node:crypto";
 import { requiredEnv } from "./config";
 
 // Only ciphertext is persisted, including in Redis AOF/snapshots.
@@ -22,6 +28,11 @@ export function decrypt(encoded: string): string {
 let client: ReturnType<typeof createClient> | undefined;
 let connecting: Promise<unknown> | undefined;
 
+function authorizationSitesKey(accessToken: string): string {
+  const fingerprint = createHash("sha256").update(accessToken).digest("hex");
+  return `authorization:${fingerprint}:sites`;
+}
+
 export async function getRedis() {
   if (!client) {
     client = createClient({
@@ -41,7 +52,83 @@ export async function getRedis() {
 
 export async function insertSiteAuthorization(siteId: string, accessToken: string) {
   const db = await getRedis();
-  await db.set(`site:${siteId}`, encrypt(accessToken));
+  const siteKey = `site:${siteId}`;
+  const previous = await db.get(siteKey);
+  let previousSitesKey: string | undefined;
+  if (previous) {
+    try {
+      const previousToken = decrypt(previous);
+      if (previousToken !== accessToken) {
+        previousSitesKey = authorizationSitesKey(previousToken);
+      }
+    } catch {
+      // Replacing an unreadable entry repairs the site mapping.
+    }
+  }
+  const sitesKey = authorizationSitesKey(accessToken);
+  await db.eval(
+    `redis.call("SET", KEYS[1], ARGV[1])
+     redis.call("SADD", KEYS[2], ARGV[2])
+     if KEYS[3] then
+       redis.call("SREM", KEYS[3], ARGV[2])
+       if redis.call("SCARD", KEYS[3]) == 0 then redis.call("DEL", KEYS[3]) end
+     end
+     return 1`,
+    {
+      keys: previousSitesKey
+        ? [siteKey, sitesKey, previousSitesKey]
+        : [siteKey, sitesKey],
+      arguments: [encrypt(accessToken), siteId],
+    }
+  );
+}
+
+export async function removeSiteAuthorization(
+  siteId: string,
+  accessToken: string
+): Promise<number> {
+  const db = await getRedis();
+  const key = `site:${siteId}`;
+  const ciphertext = await db.get(key);
+  if (!ciphertext) throw new Error("Site authorization changed");
+
+  if (decrypt(ciphertext) !== accessToken) throw new Error("Site authorization changed");
+
+  // One Webflow grant can authorize multiple sites. Only revoke it upstream
+  // after its final site mapping has been removed.
+  const sitesKey = authorizationSitesKey(accessToken);
+  const result = await db.eval(
+    `if redis.call("GET", KEYS[1]) ~= ARGV[1] then return -1 end
+     redis.call("DEL", KEYS[1])
+     redis.call("SREM", KEYS[2], ARGV[2])
+     return redis.call("SCARD", KEYS[2])`,
+    { keys: [key, sitesKey], arguments: [ciphertext, siteId] }
+  );
+  if (result === -1) throw new Error("Site authorization changed");
+  let remainingSites = Number(result);
+
+  if (remainingSites === 0) {
+    // Backfill the index for mappings written before disconnect support.
+    for await (const keys of db.scanIterator({ MATCH: "site:*", COUNT: 100 })) {
+      if (keys.length === 0) continue;
+      const values = await db.mGet(keys);
+      for (let index = 0; index < values.length; index += 1) {
+        const value = values[index];
+        if (!value) continue;
+        try {
+          if (decrypt(value) === accessToken) {
+            await db.sAdd(sitesKey, keys[index].slice("site:".length));
+            remainingSites += 1;
+          }
+        } catch {
+          // Ignore unrelated corrupt entries; they cannot contain this token.
+        }
+      }
+    }
+  }
+
+  if (remainingSites === 0) await db.del(sitesKey);
+  return remainingSites;
 }
 
 export async function getAccessTokenFromSiteId(siteId: string): Promise<string> {
@@ -51,4 +138,8 @@ export async function getAccessTokenFromSiteId(siteId: string): Promise<string> 
   return decrypt(ciphertext);
 }
 
-export default { insertSiteAuthorization, getAccessTokenFromSiteId };
+export default {
+  insertSiteAuthorization,
+  removeSiteAuthorization,
+  getAccessTokenFromSiteId,
+};

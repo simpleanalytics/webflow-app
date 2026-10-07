@@ -50,5 +50,10 @@ export function useAuth() {
     return () => clearTimeout(timer);
   }, [sessionToken, exchangeAndVerifyIdToken]);
 
-  return { sessionToken, isAuthLoading, exchangeAndVerifyIdToken, logout: () => setSessionToken("") };
+  return {
+    sessionToken,
+    isAuthLoading,
+    exchangeAndVerifyIdToken,
+    clearSession: () => setSessionToken(""),
+  };
 }

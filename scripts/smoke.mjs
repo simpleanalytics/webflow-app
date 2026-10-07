@@ -16,6 +16,8 @@ if (process.argv.includes("--unhealthy")) {
     const response = await request(`/api/scripts/${action}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ siteId: "test-site", scriptId: "test-script", version: "1.0.0" }) });
     assert.equal(response.status, 401);
   }
+  const disconnect = await request("/api/auth/disconnect", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ siteId: "test-site" }) });
+  assert.equal(disconnect.status, 401);
   for (const path of ["/api/sites", "/api/scripts/status?siteId=test-site"]) {
     assert.equal((await request(path)).status, 401);
   }
